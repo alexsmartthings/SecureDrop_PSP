@@ -1,9 +1,15 @@
 import protocol.Protocol;
 import util.IOUtil;
 
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
 import java.io.*;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
+import java.security.PublicKey;
+import java.util.Base64;
 import java.util.Scanner;
 
 /*
@@ -37,13 +43,19 @@ public class ClientMain {
         String portStr = sc.nextLine().trim();
         int port = portStr.isEmpty() ? 15000 : Integer.parseInt(portStr);
 
+
+        // Configuramos la ruta al truststore y su contraseña
+        System.setProperty("javax.net.ssl.trustStore", "ssl/client_truststore.p12");
+        System.setProperty("javax.net.ssl.trustStorePassword", "123456");
+
         try (
                 // =====================================================
                 // TODO 1:
                 // Cambiar Socket por SSLSocket.
                 // Esto activará comunicación cifrada (TLS).
                 // =====================================================
-                Socket socket = new Socket(host, port);
+
+                Socket socket = javax.net.ssl.SSLSocketFactory.getDefault().createSocket(host, port);
 
                 BufferedReader in = new BufferedReader(
                         new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
@@ -51,6 +63,8 @@ public class ClientMain {
                 PrintWriter out = new PrintWriter(
                         new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true)
         ) {
+
+            System.out.println("SERVER> " + in.readLine());
 
             // LOGIN
             System.out.print("Usuario: ");
@@ -92,8 +106,38 @@ public class ClientMain {
                     // antes de enviarlo al servidor.
                     // =====================================================
 
-                    out.println("SEND " + msg);
-                    System.out.println("SERVER> " + in.readLine());
+                    try {
+                        // Extraer clave pública del servidor desde el truststore
+                        KeyStore ts = KeyStore.getInstance("PKCS12");
+                        try (FileInputStream fis = new FileInputStream("ssl/client_truststore.p12")) {
+                            ts.load(fis, "123456".toCharArray());
+                        }
+                        PublicKey serverPublicKey = ts.getCertificate("servidor").getPublicKey();
+
+                        // Generar clave AES temporal (128 bits) para este mensaje
+                        KeyGenerator keyGen = KeyGenerator.getInstance("AES");
+                        keyGen.init(128);
+                        SecretKey aesKey = keyGen.generateKey();
+
+                        // Cifrar el mensaje con la clave AES
+                        Cipher aesCipher = Cipher.getInstance("AES");
+                        aesCipher.init(Cipher.ENCRYPT_MODE, aesKey);
+                        byte[] encryptedMsgBytes = aesCipher.doFinal(msg.getBytes(StandardCharsets.UTF_8));
+                        String encryptedMsgBase64 = Base64.getEncoder().encodeToString(encryptedMsgBytes);
+
+                        // Cifrar la clave AES con la clave pública RSA del servidor
+                        Cipher rsaCipher = Cipher.getInstance("RSA");
+                        rsaCipher.init(Cipher.ENCRYPT_MODE, serverPublicKey);
+                        byte[] encryptedKeyBytes = rsaCipher.doFinal(aesKey.getEncoded());
+                        String encryptedKeyBase64 = Base64.getEncoder().encodeToString(encryptedKeyBytes);
+
+                        // Enviar al servidor: Comando + Clave Cifrada + Mensaje Cifrado
+                        out.println("SEND " + encryptedKeyBase64 + " " + encryptedMsgBase64);
+                        System.out.println("SERVER> " + in.readLine());
+
+                    } catch (Exception e) {
+                        System.out.println("Error al cifrar el mensaje: " + e.getMessage());
+                    }
 
                 } else if ("2".equals(opt)) {
 

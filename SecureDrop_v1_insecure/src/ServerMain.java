@@ -31,14 +31,16 @@ public class ServerMain {
         UserStore userStore = new UserStore("users.txt");
         MessageStore messageStore = new MessageStore("data");
 
+        System.setProperty("javax.net.ssl.keyStore", "ssl/server_keystore.p12");
+        System.setProperty("javax.net.ssl.keyStorePassword", "123456");
+
         try (
-                // =====================================================
                 // TODO 1:
-                // Cambiar ServerSocket por SSLServerSocket.
-                //
+                // Cambiar ServerSocket por SSLServerSocket
                 // Esto activará comunicación cifrada (TLS).
-                // =====================================================
-                ServerSocket serverSocket = new ServerSocket(PORT)
+
+                ServerSocket serverSocket = javax.net.ssl.SSLServerSocketFactory.getDefault().createServerSocket(PORT)
+
         ) {
 
             while (true) {

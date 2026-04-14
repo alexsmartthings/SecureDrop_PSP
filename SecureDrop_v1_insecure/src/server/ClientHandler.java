@@ -2,9 +2,15 @@ package server;
 
 import protocol.Protocol;
 
+import javax.crypto.Cipher;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
 import java.io.*;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
+import java.security.PrivateKey;
+import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 
@@ -121,7 +127,10 @@ public class ClientHandler implements Runnable {
             e.printStackTrace();
 
         } finally {
-            try { socket.close(); } catch (IOException ignored) {}
+            try {
+                socket.close();
+            } catch (IOException ignored) {
+            }
         }
     }
 
@@ -171,11 +180,38 @@ public class ClientHandler implements Runnable {
     private void handleSend(String message, PrintWriter out) {
 
         if (message == null || message.trim().isEmpty()) {
-            out.println(Protocol.ERR + " Uso: SEND <mensaje>");
+            out.println(Protocol.ERR + " Uso: SEND <clave_aes_cifrada> <mensaje_cifrado>");
             return;
         }
 
         try {
+            // Separamos la clave AES cifrada del mensaje cifrado
+            String[] parts = message.split(" ", 2);
+            if (parts.length < 2) {
+                out.println(Protocol.ERR + " Formato de cifrado incorrecto.");
+                return;
+            }
+            String encryptedKeyBase64 = parts[0];
+            String encryptedMsgBase64 = parts[1];
+
+            // Extraer la clave privada del servidor desde el keystore
+            KeyStore ks = KeyStore.getInstance("PKCS12");
+            try (FileInputStream fis = new FileInputStream("ssl/server_keystore.p12")) {
+                ks.load(fis, "123456".toCharArray());
+            }
+            PrivateKey privateKey = (PrivateKey) ks.getKey("servidor", "123456".toCharArray());
+
+            //  Descifrar la clave AES usando la clave privada RSA
+            Cipher rsaCipher = Cipher.getInstance("RSA");
+            rsaCipher.init(Cipher.DECRYPT_MODE, privateKey);
+            byte[] aesKeyBytes = rsaCipher.doFinal(Base64.getDecoder().decode(encryptedKeyBase64));
+            SecretKey aesKey = new SecretKeySpec(aesKeyBytes, "AES");
+
+            //  Descifrar el mensaje usando la clave AES que acabamos de obtener
+            Cipher aesCipher = Cipher.getInstance("AES");
+            aesCipher.init(Cipher.DECRYPT_MODE, aesKey);
+            byte[] decryptedMsgBytes = aesCipher.doFinal(Base64.getDecoder().decode(encryptedMsgBase64));
+            String decryptedMessage = new String(decryptedMsgBytes, StandardCharsets.UTF_8);
 
             // =====================================================
             // TODO 4:
@@ -190,12 +226,13 @@ public class ClientHandler implements Runnable {
             // Ahora mismo se guarda en texto normal.
             // =====================================================
 
-            messageStore.storeMessage(sessionUser.username, message);
+            messageStore.storeMessage(sessionUser.username, decryptedMessage);
 
-            out.println(Protocol.OK + " Mensaje almacenado");
+            out.println(Protocol.OK + " Mensaje recibido y descifrado correctamente");
 
         } catch (Exception e) {
-            out.println(Protocol.ERR + " Error guardando mensaje");
+            System.err.println("Error descifrando mensaje: " + e.getMessage());
+            out.println(Protocol.ERR + " Error procesando el mensaje cifrado");
         }
     }
 
