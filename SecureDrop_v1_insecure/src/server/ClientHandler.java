@@ -37,10 +37,11 @@ public class ClientHandler implements Runnable {
 
     private UserStore.User sessionUser = null;
 
-    public ClientHandler(Socket socket, UserStore userStore, MessageStore messageStore) {
+    public ClientHandler(Socket socket, UserStore userStore, MessageStore messageStore, SecurityPolicy securityPolicy) {
         this.socket = socket;
         this.userStore = userStore;
         this.messageStore = messageStore;
+        this.securityPolicy = securityPolicy; // Politica de seguridad
     }
 
     @Override
@@ -135,28 +136,6 @@ public class ClientHandler implements Runnable {
     }
 
     private void handleLogin(String rest, PrintWriter out) {
-
-        // =====================================================
-        // TODO 3: Mejorar autenticación
-        //
-        // Ahora mismo la contraseña se compara directamente
-        // y en users.txt está guardada la contraseña REAL.
-        // Eso es inseguro.
-        //
-        // En la versión segura hay que:
-        //
-        // 1) NO guardar la contraseña real.
-        // 2) Guardar HASH + SALT de la contraseña.
-        // 3) Cuando el usuario escriba su contraseña,
-        //    calcular su HASH y comparar HASH con HASH.
-        // 4) Limitar intentos fallidos y bloquear usuario.
-        //
-        // Es decir:
-        //    hash(passwordEscrita + salt) == hashGuardado
-        //
-        // NO volver a comparar contraseñas en texto normal.
-        // =====================================================
-
         String[] parts = rest.split(" ", 2);
         if (parts.length < 2) {
             out.println(Protocol.ERR + " Uso: LOGIN <user> <pass>");
@@ -166,13 +145,21 @@ public class ClientHandler implements Runnable {
         String user = parts[0].trim();
         String pass = parts[1].trim();
 
+        // TÚ CÓDIGO: Comprobar bloqueo ANTES de validar
+        if (securityPolicy.isBlocked(user)) {
+            out.println(Protocol.ERR + " Cuenta bloqueada temporalmente por demasiados intentos.");
+            return;
+        }
+
         Optional<UserStore.User> u = userStore.authenticate(user, pass);
 
         if (u.isPresent()) {
+            securityPolicy.registerSuccess(user); // TÚ CÓDIGO: Éxito, reseteamos intentos
             sessionUser = u.get();
             out.println(Protocol.OK + " Autenticado como "
                     + sessionUser.username + " (" + sessionUser.role + ")");
         } else {
+            securityPolicy.registerFailure(user); // TÚ CÓDIGO: Fallo, sumamos intento
             out.println(Protocol.ERR + " Credenciales incorrectas");
         }
     }
