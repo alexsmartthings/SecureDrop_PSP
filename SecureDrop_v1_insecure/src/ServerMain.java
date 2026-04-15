@@ -31,6 +31,8 @@ public class ServerMain {
         UserStore userStore = new UserStore("users.txt");
         MessageStore messageStore = new MessageStore("data");
 
+        SecurityPolicy securityPolicy = new SecurityPolicy();
+
         System.setProperty("javax.net.ssl.keyStore", "ssl/server_keystore.p12");
         System.setProperty("javax.net.ssl.keyStorePassword", "123456");
 
@@ -58,7 +60,7 @@ public class ServerMain {
                 // =====================================================
 
                 new Thread(
-                        new server.ClientHandler(client, userStore, messageStore)
+                        new server.ClientHandler(client, userStore, messageStore, securityPolicy)
                 ).start();
             }
 
