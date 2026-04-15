@@ -3,36 +3,25 @@ package server;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
 
-/*
-=========================================================
-USERSTORE
-=========================================================
-
-Esta clase:
-- Carga los usuarios desde users.txt
-- Comprueba usuario y contraseña
-
-Ahora mismo es INSEGURA porque:
-- Guarda la contraseña real en texto normal.
-
-En la versión segura hay que:
-- Guardar HASH + SALT.
-- No guardar nunca la contraseña real.
-*/
+// Esta clase ahora implementa el almacenamiento seguro 
+//de contraseñas mediante Hash (SHA-256) y Salt.
 
 public class UserStore {
 
     public static class User {
         public final String username;
-        public final String passwordPlain; // INSEGURO (v1)
+        public final String salt;         
+        public final String passwordHash; 
         public final Role role;
 
-        public User(String username, String passwordPlain, Role role) {
+        public User(String username, String salt, String passwordHash, Role role) {
             this.username = username;
-            this.passwordPlain = passwordPlain;
+            this.salt = salt;
+            this.passwordHash = passwordHash;
             this.role = role;
         }
     }
@@ -47,6 +36,17 @@ public class UserStore {
         load(path);
     }
 
+    private String hashPassword(String password, String salt) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            md.update(Base64.getDecoder().decode(salt));
+            byte[] hashedBytes = md.digest(password.getBytes(StandardCharsets.UTF_8));
+            return Base64.getEncoder().encodeToString(hashedBytes);
+        } catch (Exception e) {
+            throw new RuntimeException("Error hashing password", e);
+        }
+    }
+
     private void load(String path) {
         try (BufferedReader br = new BufferedReader(new FileReader(path))) {
 
@@ -58,13 +58,16 @@ public class UserStore {
                 if (line.isEmpty() || line.startsWith("#")) continue;
 
                 String[] parts = line.split(":");
-                if (parts.length != 3) continue;
+                
+                // MODIFICADO: Ahora esperamos 4 partes (usuario:salt:hash:rol)
+                if (parts.length != 4) continue;
 
                 String username = parts[0].trim();
-                String password = parts[1].trim();
-                Role role = Role.valueOf(parts[2].trim().toUpperCase());
+                String salt = parts[1].trim();
+                String hash = parts[2].trim();
+                Role role = Role.valueOf(parts[3].trim().toUpperCase());
 
-                users.put(username, new User(username, password, role));
+                users.put(username, new User(username, salt, hash, role));
             }
 
         } catch (IOException e) {
@@ -76,31 +79,13 @@ public class UserStore {
 
         User u = users.get(username);
         if (u == null) return Optional.empty();
+        
+        String computedHash = hashPassword(password, u.salt);
 
-        // =====================================================
-        // TODO 1: AUTENTICACIÓN SEGURA
-        //
-        // Ahora mismo se compara así:
-        //     contraseñaReal.equals(contraseñaEscrita)
-        //
-        // En la versión segura hay que:
-        //
-        // 1) Guardar HASH + SALT en vez de contraseña real.
-        // 2) Cuando el usuario escriba su contraseña:
-        //    - Calcular su HASH.
-        //    - Comparar HASH con HASH.
-        //
-        // Ejemplo:
-        //     hash(password + salt) == hashGuardado
-        //
-        // =====================================================
-
-        if (u.passwordPlain.equals(password)) {
+        if (u.passwordHash.equals(computedHash)) {
             return Optional.of(u);
         }
 
         return Optional.empty();
     }
-
 }
-
